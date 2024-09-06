@@ -1,0 +1,1566 @@
+---
+title: "Natural History Study Results"
+output: word_document
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+---
+
+
+```{r, message=FALSE, results="asis",echo=FALSE,warning=FALSE}
+library(ggplot2)
+library(RColorBrewer)
+library(viridis)
+library(tidyverse)
+library(plotly)
+library(naniar)
+library(mice)
+library(lme4)
+library(lmerTest)
+library(zoo)
+library(writexl)
+library(readxl)
+library(gtsummary)
+library(knitr)
+library(anytime)
+
+
+
+calculate_correlation_with_ci <- function(x, y) {
+  # Calculate the correlation coefficient and 95% CI
+  correlation_test <- cor.test(x, y, method = "pearson",use = "pairwise.complete.obs")
+  # Extract correlation coefficient and CI bounds
+  correlation <- correlation_test$estimate
+  lower_bound <- correlation_test$conf.int[1]
+  upper_bound <- correlation_test$conf.int[2]
+  # Print the results
+  cat("Correlation Coefficient:", correlation, "\n")
+  cat("95% Confidence Interval - Lower Bound:", lower_bound, "\n")
+  cat("95% Confidence Interval - Upper Bound:", upper_bound, "\n")
+  # Return the results as a data frame 
+  result <- tibble(
+    correlation = correlation,
+    lower_bound = lower_bound,
+    upper_bound = upper_bound
+  )
+  return(result)
+}
+ 
+#read data;
+# newdata1<- read_excel("C:\\Users\\mshi27\\Desktop\\NAC Attack\\FIGHT_RP.xlsx",sheet = "Sheet1")
+ 
+newdata<- read_excel("C:\\Users\\mshi27\\Desktop\\Natural History\\Natural history data for Dr. Kong.xlsx")
+
+# names(newdata)
+
+# Select specific columns from newdata
+V1 <- newdata %>%
+  # Select the relevant columns: "Patient Demographics", "...2" to "...8", "Visit 1", and "...10" to "...14"
+  select("Patient Demographics", "...2":"...5","...6":"...14")%>%
+  # Rename columns using the first row and remove the first row from the data
+  {colnames(.) <- unlist(.[1, ]); .[-1, ]} %>% 
+  # Convert 'Visit date' to a Date object and add a 'Time' column with a constant value of "0"
+  mutate(
+    `Visit date` = as.Date(as.numeric(`Visit date`), origin = "1900-01-01"),
+     DOB = as.Date(as.numeric(DOB), origin = "1900-01-01"),
+    Time = "0"
+  ) %>% 
+ # Convert all other columns (except 'Subject ID', 'Visit date', 'DOB', and 'Time') to numeric
+  mutate_at(
+    vars(-`Subject ID`, -`Visit date`, -DOB, -Time,-Race,-Sex),
+    ~ as.numeric(gsub("[^0-9.-]", "", .))
+  )
+
+
+ 
+V2 <- newdata %>%
+  select("Patient Demographics", "...2":"...5","...15":"...23")%>%
+  {colnames(.) <- unlist(.[1, ]); .[-1, ]} %>% 
+  mutate(
+    `Visit date` = as.Date(as.numeric(`Visit date`), origin = "1900-01-01"),
+     DOB = as.Date(as.numeric(DOB), origin = "1900-01-01"),
+    Time = "6"
+  ) %>% 
+  mutate_at(
+    vars(-`Subject ID`, -`Visit date`, -DOB, -Time,-Race,-Sex),
+    ~ as.numeric(gsub("[^0-9.-]", "", .))
+  )
+
+
+V3 <- newdata %>%
+  select("Patient Demographics", "...2":"...5","...24":"...32")%>%
+  {colnames(.) <- unlist(.[1, ]); .[-1, ]} %>% 
+  mutate(
+    `Visit date` = as.Date(as.numeric(`Visit date`), origin = "1900-01-01"),
+     DOB = as.Date(as.numeric(DOB), origin = "1900-01-01"),
+    Time = "12"
+  ) %>% 
+  mutate_at(
+    vars(-`Subject ID`, -`Visit date`, -DOB, -Time,-Race,-Sex),
+    ~ as.numeric(gsub("[^0-9.-]", "", .))
+  )
+
+V4 <- newdata %>%
+  select("Patient Demographics", "...2":"...5","...33":"...41")%>%
+  {colnames(.) <- unlist(.[1, ]); .[-1, ]} %>% 
+  mutate(
+    `Visit date` = as.Date(as.numeric(`Visit date`), origin = "1900-01-01"),
+     DOB = as.Date(as.numeric(DOB), origin = "1900-01-01"),
+    Time = "18"
+  ) %>% 
+  mutate_at(
+    vars(-`Subject ID`, -`Visit date`, -DOB, -Time,-Race,-Sex),
+    ~ as.numeric(gsub("[^0-9.-]", "", .))
+  )
+
+V5 <- newdata %>%
+  select("Patient Demographics", "...2":"...5","...42":"...50")%>%
+  {colnames(.) <- unlist(.[1, ]); .[-1, ]} %>% 
+  mutate(
+    `Visit date` = as.Date(as.numeric(`Visit date`), origin = "1900-01-01"),
+     DOB = as.Date(as.numeric(DOB), origin = "1900-01-01"),
+    Time = "24"
+  ) %>% 
+  mutate_at(
+    vars(-`Subject ID`, -`Visit date`, -DOB, -Time,-Race,-Sex),
+    ~ as.numeric(gsub("[^0-9.-]", "", .))
+  )
+
+ 
+data<- bind_rows(V1,V2,V3,V4,V5)  
+ 
+
+
+  
+# Create a function to process the data
+process_data <- function(data, columns, prefix) {
+  data %>%
+    mutate(across(all_of(columns), ~ unclass(.))) %>%
+    pivot_longer(cols = all_of(columns), values_to = prefix) %>%
+    # filter(!is.na(!!sym(prefix))) %>%  # Filter out empty values
+    arrange(patient_id) %>%
+    mutate(Eye = toupper(substr(name, nchar(name) - 1, nchar(name)))) %>%
+    dplyr::select(patient_id, Eye,Time,Visit_Date,!!sym(prefix))
+}
+
+ 
+# Rename the variables with better names
+better_names <- c("patient_id", "Age","DOB" ,"Sex" ,"Race" ,"Visit_Date", "VA_OD_snellen","VA_OD","VA_OS_snellen","VA_OS", "MAIA_Avg_threshold_OD", "MAIA_Avg_threshold_OS", "EZ_width_OD", "EZ_width_OS","Time")
+names(data) <- better_names
+
+
+# Process different types of eye level data
+EZ_width<- process_data(data, c("EZ_width_OD", "EZ_width_OS"), "EZ_width")
+VA<- process_data(data, c("VA_OD", "VA_OS"), "VA")
+MAIA<- process_data(data, c("MAIA_Avg_threshold_OD", "MAIA_Avg_threshold_OS"), "MAIA")
+
+
+
+
+###############################################################################################
+#merge three data together : Eye level data(data1); eye level data use for modeling/summary statistics but for not correlation, this is repeated measure data;
+###############################################################################################
+data1<- VA %>% 
+  left_join(EZ_width, by = c("patient_id","Eye","Time","Visit_Date")) %>% 
+  left_join(MAIA, by = c("patient_id","Eye","Time","Visit_Date")) %>% 
+  mutate(MAIA= as.numeric(MAIA),
+         Time = as.numeric(Time))  %>% # visit date convert to date format; then the data will use for run mix model;
+  mutate(EZ_width = ifelse(Time == '24' & patient_id == "NRP-008" & Eye == "OD", 2369, EZ_width),
+         EZ_width = ifelse(Time == '24' & patient_id == "NRP-008" & Eye == "OS", 2451, EZ_width)) #replace the correct value for EZ based on email received on June 12 from Muhammad Jehanzeb Khan; 
+
+ 
+
+ 
+
+# get the ID for those only have baseline data but no follow up data for EZ;
+result <- data1 %>%
+  filter(Time %in% c(6, 12, 18, 24)) %>%
+  group_by(patient_id) %>%
+  summarise(all_EZ_width_NA = all(is.na(EZ_width))) %>%
+  filter(all_EZ_width_NA) %>%
+  pull(patient_id)
+
+#filter out those ID only have baseline data but no follow up data for EZ
+data2<- data1 %>% filter(! patient_id %in% result)
+
+
+# Print the dataframe
+# cat(index %>% pull(ID) %>% 
+#   paste0('"', ., '"') %>% 
+#   toString(), "\n")
+
+
+#############################################################################################################
+# Fit the linear mixed-effects model using eye level data filtered out those ID only have baseline data but no follow up data for EZ;
+model1 <- lmer(EZ_width ~ Time + (1 | patient_id), data = data2)
+mix_model_result<- summary(model1) #we only look at this model result. 
+# model2 <- lmer(EZ_width ~ Time * Eye + (1 | patient_id), data = data1)
+# model3 <- lmer(EZ_width ~ Eye + (1 | patient_id), data = data1)
+# model4 <- lmer(EZ_width ~ Eye + (1 | Time), data = data1)
+# model5 <- lmer(EZ_width ~ Time + (1 | Eye), data = data1)
+# model6 <- lmer(EZ_width ~ Time * Eye + (1 | patient_id) + (1 | Eye), data = data1)
+# model7 <- lmer(EZ_width ~ Time * Eye + (1 | patient_id) + (1 | Time), data = data1)
+# model8 <- lmer(EZ_width ~ Time * Eye + (1 + Time | patient_id), data = data1)
+# model9 <- lmer(EZ_width ~ Time * Eye + (1 + Time | Eye), data = data1)
+# model10 <- lmer(EZ_width ~ Time * Eye + (1 + Time | patient_id), data = data1)
+
+ 
+# 
+# # Function to extract all fixed effects and model information from a model
+# get_all_fixed_effects <- function(model, model_name) {
+#   fixed_effects <- as.data.frame(summary(model)$coefficients)
+#   fixed_effects <- mutate(fixed_effects, Model = model_name)
+#   fixed_effects$AIC <- AIC(model)
+#   fixed_effects$BIC <- BIC(model)
+#   return(fixed_effects)
+# }
+#  
+# 
+# # Combine tables for each model with all fixed effects
+# combined_table <- bind_rows(
+#   get_all_fixed_effects(model1, as.character(formula(model1))[3]),
+#   get_all_fixed_effects(model2, as.character(formula(model2))[3]),
+#   get_all_fixed_effects(model3, as.character(formula(model3))[3]),
+#   get_all_fixed_effects(model4, as.character(formula(model4))[3]),
+#   get_all_fixed_effects(model5, as.character(formula(model5))[3]),
+#   get_all_fixed_effects(model6, as.character(formula(model6))[3]),
+#   get_all_fixed_effects(model7, as.character(formula(model7))[3]),
+#   get_all_fixed_effects(model8, as.character(formula(model8))[3]),
+#   get_all_fixed_effects(model9, as.character(formula(model9))[3]),
+#   get_all_fixed_effects(model10, as.character(formula(model10))[3])
+# )
+# 
+# 
+# combined_table<- combined_table %>%  mutate( Sig = ifelse(`Pr(>|t|)` <=0.05,"***"," "))%>% 
+#   mutate(Smallest_AIC = ifelse(AIC == min(AIC), "Smallest_AIC", ""),
+#          Smallest_BIC = ifelse(BIC == min(BIC), "Smallest_BIC", ""))
+# 
+
+ 
+# Notes: if the last visit is missing, we shall use the visit before last visit ; if that date is still missing, then using the predictive mean matching ; create m=50 separate imputed dataset.  
+ 
+# Impute missing values for AAC use purpose; i.e only need EZ fill missing;
+# Impute missing dates using linear interpolation;
+# Linear interpolation is a method of estimating values that lie between two known data points.
+# data$EZ_width<-na.approx(data$EZ_width, na.rm = FALSE)
+# data$VA<-na.approx(data$VA, na.rm = FALSE)
+# data$MAIA<-na.approx(data$MAIA, na.rm = FALSE)
+# data$Visit_Date <- na.approx(data$Visit_Date, na.rm = FALSE)
+
+
+# write.xlsx(combined_table, file = "Narutal_History_models_results(multiple imputation).xlsx", row.names = TRUE)
+
+###################################################################################################################
+#
+###################################################################################################################
+# Create a dataframe with the corrected data based on June10 email from Dagmar;
+
+index <- data.frame(
+  ID = c(1201, 1202, 1203, 1204, 1205, 1209, 1211, 1214, 1216, 1218, 1220, 1225, 1226, 1232,1219),
+  patient_id = c("NRP-024", "NRP-006", "NRP-018", "NRP-012", "NRP-027", "NRP-030", "NRP-009", "NRP-008", "NRP-019", "NRP-013", "NRP-015", "NRP-011", "NRP-025", "NRP-001","NRP-031")
+)
+
+
+data3<- data1 %>% left_join(index, by ="patient_id") 
+
+
+ # Create a dataframe with the provided data including the new column
+redcap_data <- data.frame(
+  ID = c(1201, 1201, 1202, 1202, 1203, 1203, 1204, 1204, 1205, 1205, 1209, 1209, 1211, 1214, 1214, 1216, 1216, 1218, 1218, 1220, 1220, 1225, 1225, 1226, 1226),
+  Eye = c("OD", "OS", "OD", "OS", "OD", "OS", "OD", "OS", "OD", "OS", "OD", "OS", "OS", "OD", "OS", "OD", "OS", "OD", "OS", "OD", "OS", "OD", "OS", "OD", "OS"),
+  VA = c(82, 84, 68, 75, 82, 81, 85, 84, 82, 82, 81, 81, 94, 87, 89, 86, 84, 85, 85, 72, 73, 79, 77, 87, 88),
+  MAIA = c(17.1, 16.0, 6.6, 8.0, 15.3, 16.0, 11.3, 5.0, 13.3, 6.9, 6.5, 9.4, 23.2, 10.2, 12.4, 4.1, 3.3, 11.0, 10.9, 14.5, 16.7, 4.3, 4.7, 7.5, 6.7),
+  EZ_width = c(3103, 2894, 2185, 1903, 2741, 3239, 2977, 1617, 2819, 3373, 1937, 2014, 6170, 2189, 2301, 1731, 1670, 2172, 2089, 3491, 3748, 1556, 1570, 1886, 2141),
+  Visit_Date = as.Date(c("2023-10-11", "2023-10-11", "2023-10-27", "2023-10-27", "2023-11-07", "2023-11-07", "2023-11-08", "2023-11-08", "2023-11-14", "2023-11-14", "2024-01-09", "2024-01-09", "2024-01-23", "2024-02-16", "2024-02-16", "2024-03-04", "2024-03-04", "2024-03-08", "2024-03-08", "2024-03-15", "2024-03-15", "2024-04-01", "2024-04-01", "2024-04-02", "2024-04-02"))
+) %>% left_join(index, by ="ID") %>% 
+  mutate(Time = "24+") %>% 
+  select(patient_id,Eye,Time,Visit_Date,VA,EZ_width,MAIA,ID)
+
+#note 1211 patient only left eye eligible ; 
+merged_data<- rbind(data3,redcap_data) %>% arrange(patient_id) %>% rename(Redcap_patient_id = ID) %>% 
+  group_by(patient_id)  
+
+ #Combine data3 and redcap_data, arrange by patient_id, rename ID column to Redcap_patient_id
+merged_data <- rbind(data3, redcap_data) %>%
+  arrange(patient_id) %>%
+  rename(Redcap_patient_id = ID) %>%
+  group_by(patient_id) %>%
+  mutate(
+    duration_months = ifelse(
+      any(Time == 0) & any(Time == "24+"),
+      time_length(interval(Visit_Date[Time == 0], Visit_Date[Time == "24+"]), "months"),
+      NA_real_
+    ),
+    duration_months = as.integer(duration_months)
+  ) %>%
+  mutate(
+    Time = as.character(Time),
+    Time = ifelse((Time == "24+"), as.character(duration_months), Time)
+  )
+
+
+# Print the result for Dr.Kong
+ # merged_data %>% group_by(patient_id,Redcap_patient_id,Time) %>% 
+ #   select(patient_id,Time,Visit_Date,duration_months) %>% unique() %>% 
+ #   filter(!is.na(duration_months) & Time %in% c("0","24+")) %>% 
+ #   mutate(Time =ifelse(Time=="0" , "NH Baseline", "NAC Date")) %>% kable()
+ 
+
+```
+
+
+# Original Data Received
+- On May 30th, 2024, Muhammad Jehanzeb Khan sent an Excel sheet containing the Natural History study data.
+- Total `r length(unique(data1$patient_id))` consented patients.
+
+# Data Error:
+- On June 10th, 2024, a biostatistician sent an email to confirm a potential data entry error for NRP-008, Visit 5, with EZ_width_OD recorded as 89 and EZ_width_OS as 88.
+- On June 12th, 2024, feedback indicated that the correct values should be 2369 for EZ_width_OD and 2451 for EZ_width_OS. 
+
+# Data merge from Redcap
+- On June 10th, 2024, Dagmar Wehling provided a list of NAC Attack patients also enrolled in the Natural History Study.
+- Merged the Natural History data with the Redcap data for EZ width and calculated the follow-up month.
+
+```{r, message=FALSE, results="asis",echo=FALSE,warning=FALSE}
+
+#######################################################################
+##Plot missing data#################################################### 
+summary_data_missing <- data1 %>%
+  group_by(Time) %>%
+  summarise(
+    n_missing_EZ_width = sum(is.na(EZ_width)),
+    total_EZ_width = n(),
+    proportion_missing = paste0(round(n_missing_EZ_width / total_EZ_width * 100, 2), "%")
+  )
+
+
+# view(summary_data_missing) 
+
+
+#######################################################################################
+# fill in missing
+#######################################################################################
+
+library(dplyr)
+
+available_patients <- merged_data %>%
+  mutate(Time = as.numeric(Time)) %>%
+  group_by(patient_id, Eye) %>%
+  arrange(patient_id, Time)  
+
+
+
+# Below patient filled 24 month value using the carry forward method;  then  FILL MISSING USING linear interpretation , we need to make sure group by patient_id and Eye to correct calculate the mean between two points ;
+
+available_patients <- merged_data %>%
+  mutate(Time = as.numeric(Time)) %>%
+  group_by(patient_id, Eye) %>%
+  arrange(patient_id, Time) %>%
+  mutate(EZ_width = case_when(
+    patient_id %in% c("NRP-007","NRP-017") & Time == 24 & is.na(EZ_width) ~ first(EZ_width[Time == 18 & !is.na(EZ_width)]),
+    patient_id %in% c("NRP-025") & Time == 24 & is.na(EZ_width) ~ first(EZ_width[Time == 27 & !is.na(EZ_width)]),
+    patient_id %in% c("NRP-027") & Time == 24 & is.na(EZ_width) ~ first(EZ_width[Time == 20 & !is.na(EZ_width)]),
+    TRUE ~ EZ_width
+  )) %>% group_by(patient_id,Eye)  %>% arrange(patient_id) %>% select(-Redcap_patient_id,-duration_months)
+
+
+ 
+
+# available_patients <- subset %>%
+#   group_by(patient_id,Eye)  %>% arrange(patient_id) %>% filter(Time %in% c(0,6,12,18,24))
+
+
+
+# filled_missing<- available_patients %>%  
+#   mutate(EZ_width = as.integer(na.approx(EZ_width, na.rm = FALSE)) )%>%
+#   filter(!is.na(EZ_width))
+ 
+
+# FIRST FILL MISSING USING linear interpretation;  
+filled_missing_pre<- available_patients %>%  
+  mutate(EZ_width = as.integer(na.approx(EZ_width, na.rm = FALSE)) )
+
+
+
+# data contains MONTH 12, no missing;
+M12<- filled_missing_pre %>%  
+ mutate(Time = as.numeric(Time)) %>%
+  group_by(patient_id, Eye) %>%
+  filter(all(c(0, 6, 12) %in% Time) & 
+         all(!is.na(EZ_width[Time %in% c(0, 6, 12)]))) %>%
+  filter(Time %in% c(0, 6, 12)) %>%
+  arrange(patient_id, Time)
+
+
+# data contains BSL to MONTH 24, no missing;
+M24<- filled_missing_pre %>%  
+ mutate(Time = as.numeric(Time)) %>%
+  group_by(patient_id, Eye) %>%
+  filter(all(c(0, 6, 12,18,24) %in% Time) & 
+         all(!is.na(EZ_width[Time %in% c(0, 6, 12,18,24)]))) %>%
+  filter(Time %in% c(0, 6, 12,18,24)) %>%
+  arrange(patient_id, Time)
+
+
+# write.csv(M24,"M24.csv")
+
+M18<- filled_missing_pre %>%  
+ mutate(Time = as.numeric(Time)) %>%
+  group_by(patient_id, Eye) %>%
+  filter(all(c(0, 6, 12,18) %in% Time) & 
+         all(!is.na(EZ_width[Time %in% c(0, 6, 12,18)]))) %>%
+  filter(Time %in% c(0, 6, 12,18)) %>%
+  arrange(patient_id, Time)
+
+
+# Specify the desired Time points
+custom_breaks <- c(0, 6, 12, 18, 24)
+# Create a bar plot of missing values over time
+p <- ggplot(summary_data_missing, aes(x = factor(Time, levels = custom_breaks), y = n_missing_EZ_width)) +
+  geom_bar(stat = "identity", fill = "darkgrey", alpha = 0.7) +
+  # geom_text(aes(label = n_missing_EZ_width, y = n_missing_EZ_width), vjust = -0.2, size = 3) +  # Add value labels on top of bars
+  geom_text(aes(label = proportion_missing, y = n_missing_EZ_width), vjust = -1.5, size = 4, color = "red") +  # Add proportion missing labels below the bars
+  labs(
+    title = "Number of Missing Values of EZ_width Over Time",
+    x = "Time in Month",
+    y = "Number of Missing Values"
+  ) +
+  scale_x_discrete(breaks = as.character(custom_breaks), labels = as.character(custom_breaks)) +  # Set custom breaks and labels
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    panel.grid.major.y = element_line(color = "lightgray"),
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    # axis.title.y = element_text(size = 12, margin = margin(r = 9, unit = "pt"), face = "bold"),
+    # axis.title.x = element_text(size = 12, margin = margin(t = 9, unit = "pt"), face = "bold"),
+    # axis.text.x = element_text(angle = 0),
+    axis.text.y = element_text(hjust = 1.5)  # Move y-axis labels to the right
+  )
+
+plotly::ggplotly(p)
+
+
+lineplot <- function(data, Time, EZ.Width) {
+  # Extract the title from the data object
+  title <- deparse(substitute(data))
+   label<- deparse(substitute(EZ_width))
+  # Create the ggplot object
+  p <- ggplot(data, aes(x = factor(Time, levels = unique(Time)), y ={{EZ.Width}} , color = patient_id, group = interaction(patient_id,Eye))) +
+    geom_line(size = 1, alpha = 0.8) +
+    # geom_point(size = 1, shape = 16, fill = "white", stroke = 1.5) +
+     labs(
+      title = paste(title,":",label," Trend Over Time by Subject"),
+      x = "Time Points",
+      y = paste0("Natural History ",label)
+    ) +
+    theme_minimal() +
+    theme(
+      legend.position = "bottom",
+      panel.grid.major.y = element_line(color = "lightgray"),
+      plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+      # axis.title.y = element_text(size = 14, margin = margin(r = 10, unit = "pt"), face = "bold"),
+      # axis.title.x = element_text(size = 14, margin = margin(t = 10, unit = "pt"), face = "bold"),
+      axis.text = element_text(size = 12, face = "bold")
+    )  +
+  #   facet_wrap(~Eye, scales = "free_y", nrow = 2) +
+    scale_color_viridis(discrete = TRUE) +
+    guides(color = FALSE) +  # Do not display legend for color
+    theme_bw()
+  
+  # Return the ggplot object
+  return(p)
+}
+
+# Convert the ggplot object to plotly
+plotly::ggplotly(lineplot(data1, Time, data1$EZ_width))
+ 
+# merged_data %>%
+#   mutate(Time = as.numeric(Time)) %>%
+#   arrange(Time) %>%
+#   pull(Time) %>% unique
+
+
+
+
+lineplot1<- function(data_FightPR1,Time,EZ_width){
+  title <- deparse(substitute(data_FightPR1))
+  label<- deparse(substitute(EZ_width))
+  ggplot(data_FightPR1, aes(x = factor(Time, levels = custom_breaks), y = {{EZ_width}}, color = Eye, group = interaction(patient_id, Eye))) +
+    geom_line(size = 1, alpha = 0.8) +
+    geom_point(size = 0.5, shape = 16, fill = "white", stroke = 1) +
+    labs(
+      title = paste(title,":",label," Trend Over Time by Subject"),
+      x = "Time Points",
+      y = paste0("Natural History ",label)
+    ) +
+      scale_x_discrete(breaks = as.character(custom_breaks), labels = as.character(custom_breaks)) +  # Set custom breaks and labels
+    theme_minimal() +
+    theme(
+      legend.position = "bottom",
+      panel.grid.major.y = element_line(color = "lightgray"),
+      plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+      # axis.title.y = element_text(size = 14, margin = margin(r = 10, unit = "pt"), face = "bold"),
+      # axis.title.x = element_text(size = 14, margin = margin(t = 10, unit = "pt"), face = "bold"),
+      axis.text = element_text(size = 12, face = "bold"),
+      axis.text.x = element_text(angle = 45, hjust = 1) 
+    ) +
+    facet_wrap(~ patient_id) +
+    scale_color_viridis(discrete = TRUE) +
+      # guides(color = FALSE) +  # Do not display legend for color
+    theme_bw()
+}
+
+
+
+plotly::ggplotly(lineplot1(data1, Time, EZ_width))
+# plotly::ggplotly(lineplot1(data1, Time, MAIA))
+# plotly::ggplotly(lineplot1(data1, Time, VA))
+
+custom_breaks <- c( 0 , 6 , 9, 12, 18 ,20 ,24, 25, 27 ,29 ,32, 33, 35, 36, 37 ,38)
+plotly::ggplotly(lineplot1(merged_data, Time, EZ_width))
+
+plotly::ggplotly(lineplot1(M24, Time, EZ_width))
+plotly::ggplotly(lineplot1(M18, Time, EZ_width))
+plotly::ggplotly(lineplot1(M12, Time, EZ_width))
+
+lineplot2 <- function(data_FightPR1, Time, EZ_width) {
+  title <- deparse(substitute(data_FightPR1))
+  label <- deparse(substitute(EZ_width))
+  ggplot(data_FightPR1, aes(x = factor(Time, levels = custom_breaks), y = {{EZ_width}}, color = Eye, group = interaction(patient_id, Eye))) +
+    geom_line(size = 0.5, alpha = 0.8) +
+    geom_point(size = 0.1, shape = 16, fill = "white", stroke = 1) +
+   geom_text(check_overlap = TRUE, aes(label = sprintf("%.0f", {{EZ_width}})), position = position_dodge(width = 0.9), vjust = 1.5, size = 3.5) +
+
+    labs(
+      title = paste(title, ":", label, " Trend Over Time by Subject"),
+      x = "Time Points",
+      y = paste0("Natural History ", label)
+    ) +
+        scale_x_discrete(breaks = as.character(custom_breaks), labels = as.character(custom_breaks)) +  # Set custom breaks and labels
+    theme_minimal() +
+    theme(
+      legend.position = "bottom",
+      panel.grid.major.y = element_line(color = "lightgray"),
+      plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+      # axis.title.y = element_text(size = 14, margin = margin(r = 10, unit = "pt"), face = "bold"),
+      # axis.title.x = element_text(size = 14, margin = margin(t = 10, unit = "pt"), face = "bold"),
+      axis.text = element_text(size = 12, face = "bold"),
+      axis.text.x = element_text(angle = 45, hjust = 1) 
+    ) +
+    facet_wrap(~ patient_id) +
+    scale_color_manual(values = c("blue", "red")) +  # Change the color palette for Eye
+    theme_bw()
+}
+
+custom_breaks <- c( 0 , 6 , 9, 12, 18 ,20 ,24, 25, 27 ,29 ,32, 33, 35, 36, 37 ,38)
+# plotly::ggplotly(lineplot2(merged_data, Time, EZ_width))
+# plotly::ggplotly(lineplot2(available_patients, Time, EZ_width))
+# plotly::ggplotly(lineplot2(filled_missing, Time, EZ_width))
+ 
+
+
+generate_missing_summary <- function(data, maia_var,var) {
+  library(glue)
+  A <- data %>%
+    filter(Time %in% c("0")) %>%
+    # filter(!(patient_id == 'EX-014' & Eye == 'OD') &
+    #          !(patient_id == 'EX-030' & Eye == 'OS')) %>%
+    group_by(Time, Eye) %>%
+    mutate(
+      time0_missing = case_when(
+        Time == "0" & is.na({{ maia_var }}) ~ "Missing",
+        Time == "0" & !is.na({{ maia_var }}) ~ "Non-Missing",
+        TRUE ~ NA_character_
+      )) %>%
+    select(patient_id, Time, {{ maia_var }}, Eye, time0_missing)
+  
+  B <- data %>%
+    filter(Time %in% c("24")) %>%
+    # filter(!(patient_id == 'EX-014' & Eye == 'OD') &
+    #          !(patient_id == 'EX-030' & Eye == 'OS')) %>%
+    group_by(Time, Eye) %>%
+    mutate(
+      time24_missing = case_when(
+        Time == "24" & is.na({{ maia_var }}) ~ "Missing",
+        Time == "24" & !is.na({{ maia_var }}) ~ "Non-Missing",
+        TRUE ~ NA_character_
+      )) %>%
+    select(patient_id, Time, {{ maia_var }}, Eye, time24_missing)
+  
+  C <- full_join(A, B, by = c("patient_id", "Eye")) %>%
+    mutate(
+      time_both_missing = case_when(
+      time0_missing == "Non-Missing" & time24_missing == "Non-Missing" ~ "Non-Missing",
+      time0_missing == "Missing" & time24_missing == "Missing" ~ "Missing",
+      time0_missing == "Non-Missing" & time24_missing == "Missing"  ~"Baseline Not Missing, Follow up Missing",
+      TRUE ~ "Baseline Missing, Follow up not Missing"
+      )
+    )
+  
+  summary_table <- C %>%
+    select(Eye, time0_missing, time24_missing, time_both_missing) %>%
+    tbl_summary(
+      by = Eye
+    ) %>%
+    modify_caption(glue("**Summary of missing {var} among eligible patients**")) %>%
+    bold_labels()
+  
+  return(summary_table )
+}
+
+# Example usage
+# Assuming data1 is name of dataset and "MAIA" is the MAIA variable
+MAIA<-generate_missing_summary(data = data1, maia_var = MAIA,var= "MAIA")
+VA<-generate_missing_summary(data = data1, maia_var = VA,var = "VA")
+EZ<-generate_missing_summary(data = data1, maia_var = EZ_width,var = "EZ")
+
+# MAIA %>%  as_gt() %>% gt::gtsave("MAIA.pdf")
+# VA %>%  as_gt() %>% gt::gtsave("VA.pdf")
+# EZ%>%  as_gt() %>% gt::gtsave("EZ.pdf")
+
+# MAIA %>%  as_gt()
+# 
+# VA %>%  as_gt()
+# 
+# EZ %>%  as_gt()
+
+# 
+# ###To confrim with Dr.Kong 
+# 
+#  A <- data1 %>%
+#     filter(Time %in% c("0")) %>%
+#     filter(!(patient_id == 'EX-014' & Eye == 'OD') &
+#              !(patient_id == 'EX-030' & Eye == 'OS')) %>%
+#     group_by(Time, Eye) %>%
+#     mutate(
+#       time0_missing = case_when(
+#         Time == "0" & is.na(EZ_width) ~ "Missing",
+#         Time == "0" & !is.na(EZ_width) ~ "Non-Missing",
+#         TRUE ~ NA_character_
+#       )) %>%
+#     select(patient_id, Time, EZ_width, Eye, time0_missing)
+# 
+#   B <- data %>%
+#     filter(Time %in% c("24")) %>%
+#     filter(!(patient_id == 'EX-014' & Eye == 'OD') &
+#              !(patient_id == 'EX-030' & Eye == 'OS')) %>%
+#     group_by(Time, Eye) %>%
+#     mutate(
+#       time24_missing = case_when(
+#         Time == "24" & is.na(EZ_width) ~ "Missing",
+#         Time == "24" & !is.na(EZ_width) ~ "Non-Missing",
+#         TRUE ~ NA_character_
+#       )) %>%
+#     select(patient_id, Time, EZ_width, Eye, time24_missing)
+# 
+#   C <- full_join(A, B, by = c("patient_id", "Eye")) %>%
+#     mutate(
+#       time_both_missing = case_when(
+#       time0_missing == "Non-Missing" & time24_missing == "Non-Missing" ~ "Non-Missing",
+#       time0_missing == "Missing" & time24_missing == "Missing" ~ "Missing",
+#       time0_missing == "Non-Missing" & time24_missing == "Missing"  ~"Baseline Not Missing, Follow up Missing",
+#       TRUE ~ "Baseline Missing, Follow up not Missing"
+#       )
+#     )
+
+
+```
+
+
+# To understand the missing data patterns in the dataset for EZ_width, we counted the number of missing as well as the percentage of missing for all consented patients.
+- The table shows the missing number and missing percentage for EZ_width for each time point among all consented patients. 
+`r summary_data_missing %>% kable()`
+- Time 0 represent for the baseline visit. other numeric number represent the month of the follow up visit. (i.e. 6 is Month 6 Followup time point).
+- Based on the missing data patterns for EZ_width, We selected baseline to 24 month data to calculate the AAC and change of MAIA as well as VA, 6 month gap between each visit.
+- Below is a summary of missing {outcome variable} among eligible patients.
+- `r EZ` 
+- `r MAIA` 
+- `r VA` 
+
+
+# Missing Data Imputation for for calculating EZ width AAC
+- Filling Missing EZ Width Values: We used linear interpolation and carry forward method to fill in missing Ellipsoid Zone (EZ) width values in the data set.
+- The key steps were:
+- Identified patients with available data group by (patient_id,Eye).
+•	Applied na.approx() function to linearly interpolate missing EZ width values, and used carry forward method to fill missing for those missed last visit.
+ 
+
+
+```{r, message=FALSE, results="asis",echo=FALSE,warning=FALSE}
+
+process_eye_data <- function(eye_value, data_name) {
+  eye_data <- get(data_name) %>%
+    filter(Eye == eye_value) %>%
+    group_by(patient_id) %>%
+    summarise(
+      y0 = EZ_width[Time == "0"],
+      y1 = EZ_width[Time == "6"],
+      y2 = EZ_width[Time == "12"],
+      y3 = EZ_width[Time == "18"],
+      y4 = EZ_width[Time == "24"]
+    ) %>%
+    ungroup()%>% 
+  mutate(Category_y1 = case_when(
+    y1 > y0 ~ "Up",
+    y1 < y0 ~ "Down",
+    TRUE ~ "Equal"
+  ),
+  Category_y2 = case_when(
+    y2 > y0 ~ "Up",
+    y2 < y0 ~ "Down",
+    TRUE ~ "Equal"
+  ),
+  Category_y3 = case_when(
+    y3 > y0 ~ "Up",
+    y3 < y0 ~ "Down",
+    TRUE ~ "Equal"
+  ),
+  Category_y4 = case_when(
+    y4 > y0 ~ "Up",
+    y4 < y0 ~ "Down",
+    TRUE ~ "Equal"
+  )) %>%
+  unite(Category, starts_with("Category_y"), sep = "")
+  
+  return(eye_data)
+}
+
+# Example usage:
+OS <- process_eye_data("OS", "M24")
+OD <- process_eye_data("OD", "M24")
+
+
+process_eye_data_18 <- function(eye_value, data_name) {
+  eye_data <- get(data_name) %>%
+    filter(Eye == eye_value) %>%
+    group_by(patient_id) %>%
+    summarise(
+      y0 = EZ_width[Time == "0"],
+      y1 = EZ_width[Time == "6"],
+      y2 = EZ_width[Time == "12"],
+      y3 = EZ_width[Time == "18"]
+    ) %>%
+    ungroup()%>% 
+  mutate(Category_y1 = case_when(
+    y1 > y0 ~ "Up",
+    y1 < y0 ~ "Down",
+    TRUE ~ "Equal"
+  ),
+  Category_y2 = case_when(
+    y2 > y0 ~ "Up",
+    y2 < y0 ~ "Down",
+    TRUE ~ "Equal"
+  ),
+  Category_y3 = case_when(
+    y3 > y0 ~ "Up",
+    y3 < y0 ~ "Down",
+    TRUE ~ "Equal"
+  )) %>%
+  unite(Category, starts_with("Category_y"), sep = "")
+  
+  return(eye_data)
+}
+
+OS_18 <- process_eye_data_18("OS", "M18")
+OD_18 <- process_eye_data_18("OD", "M18")
+
+
+process_eye_data_12 <- function(eye_value, data_name) {
+  eye_data <- get(data_name) %>%
+    filter(Eye == eye_value) %>%
+    group_by(patient_id) %>%
+    summarise(
+      y0 = EZ_width[Time == "0"],
+      y1 = EZ_width[Time == "6"],
+      y2 = EZ_width[Time == "12"]
+    ) %>%
+    ungroup()%>% 
+  mutate(Category_y1 = case_when(
+    y1 > y0 ~ "Up",
+    y1 < y0 ~ "Down",
+    TRUE ~ "Equal"
+  ),
+  Category_y2 = case_when(
+    y2 > y0 ~ "Up",
+    y2 < y0 ~ "Down",
+    TRUE ~ "Equal"
+  )) %>%
+  unite(Category, starts_with("Category_y"), sep = "")
+  
+  return(eye_data)
+}
+
+OS_12 <- process_eye_data_12("OS", "M12")
+OD_12 <- process_eye_data_12("OD", "M12")
+
+# Combine the "Category" columns from both data frames
+all_categories <- c(OS$Category, OD$Category)
+# Find unique values
+unique_categories <- unique(all_categories)
+# Print unique categories
+
+
+# 
+# 
+# all_categories_12 <- c(OS_12$Category, OD_12$Category)
+# 
+# all_categories_18 <- c(OS_18$Category, OD_18$Category)
+
+
+
+
+
+# Function to calculate AAC using trapezoidal rule
+calculate_aac_UpDownDownDown <- function(y,t) {
+  y0<- y[[1]]
+  y1<- y[[2]]
+  y2<- y[[3]]
+  y3<- y[[4]]
+  y4<- y[[5]]
+  #A calculate the area above the baseline
+  A<- 0.5*t*(y1-y0)+ 0.5*(t*(y1-y0)/(y1-y2))*(y1-y0)
+  B<-  0.5*(t*(y0-y2)/(y1-y2))*(y0-y2) +0.5*t*((y0-y2)+(y0-y3))+0.5*t*((y0-y3)+(y0-y4))
+    
+  total_aac <- B-A
+  return(total_aac)
+}
+
+
+
+# Function to calculate AAC using trapezoidal rule
+calculate_aac_UpUpUpDown <- function(y,t) {
+  y0<- y[[1]]
+  y1<- y[[2]]
+  y2<- y[[3]]
+  y3<- y[[4]]
+  y4<- y[[5]]
+    
+  A<- 0.5*t*(y1-y0)+0.5*t*((y1-y0)+(y2-y0))+0.5*t*((y2-y0)+(y3-y0))+0.5*t*((y3-y0)/(y3-y4))*(y3-y0)
+  B<- 0.5*t*((y0-y4)/(y3-y4))*(y0-y4)
+  total_aac <- B-A
+  return(total_aac)
+}
+
+
+# Function to calculate AAC using trapezoidal rule
+calculate_aac_UpUpUpUp <- function(y,t) {
+  y0<- y[[1]]
+  y1<- y[[2]]
+  y2<- y[[3]]
+  y3<- y[[4]]
+  y4<- y[[5]]
+  A<- 0.5*t*(y1-y0)+0.5*t*((y1-y0)+(y2-y0))+0.5*t*((y2-y0)+(y3-y0))+ 0.5*t*((y3-y0)+(y4-y0))
+  B<- 0
+  total_aac <- B-A
+  return(total_aac)
+}
+
+calculate_aac_DownUpUpUp <- function(y,t) {
+  y0<- y[[1]]
+  y1<- y[[2]]
+  y2<- y[[3]]
+  y3<- y[[4]]
+  y4<- y[[5]]
+  B<- 0.5*t*(y0-y1)+0.5*(y0-y1)*(t*(y2-y1)/(y0-y1))
+  A<- 0.5*(y2-y0)*(t*(y2-y0)/(y2-y1))+0.5*t*((y2-y0)+(y3-y0))+0.5*t*((y3-y0)+(y4-y0))
+  total_aac<- B-A
+  return(total_aac)
+}
+
+
+calculate_aac_UpUpDownDown <- function(y,t) {
+  y0<- y[[1]]
+  y1<- y[[2]]
+  y2<- y[[3]]
+  y3<- y[[4]]
+  y4<- y[[5]]
+  B<- 0.5*(t*(y0-y3)/(y2-y3))*(y0-y3)+0.5*t*((y0-y3)+(y0-y4))
+  A<- 0.5*t*(y1-y0)+0.5*t*((y1-y0)+(y2-y0))+0.5*(t*(y2-y0)/(y2-y3))*(y2-y0)
+  total_aac<- B-A
+  return(total_aac)
+}
+
+
+calculate_aac_DownDownUpDown <- function(y,t) {
+  y0<- y[[1]]
+  y1<- y[[2]]
+  y2<- y[[3]]
+  y3<- y[[4]]
+  y4<- y[[5]]
+  A<- 0.5*(t*(y3-y0)/(y3-y2))*(y3-y0)+0.5*(t*(y3-y0)/(y3-y4))*(y3-y0)
+  B<- 0.5*t*(y0-y1)+0.5*t*((y0-y1)+(y0-y2))+0.5*(t*(y0-y2)/(y3-y2))*(y0-y2)+0.5*(y0-y4)*(t*(y0-y4)/(y3-y4))
+  total_aac<- B-A
+  return(total_aac)
+}
+
+
+calculate_aac_DownUpDownDown <- function(y,t) {
+  y0<- y[[1]]
+  y1<- y[[2]]
+  y2<- y[[3]]
+  y3<- y[[4]]
+  y4<- y[[5]]
+  A<- 0.5*(y2-y0)*(t*(y2-y0)/(y2-y1))+0.5*(y2-y0)*(t*(y2-y0)/(y2-y3))
+  B<- 0.5*t*(y0-y1)+0.5*(y0-y1)*(t*(y2-y1)/(y0-y1))+0.5*(t*(y0-y3)/(y2-y3))*(y0-y3)+
+    0.5*t*((y0-y3)+(y0-y4))
+  total_aac<- B-A
+  return(total_aac)
+}
+
+
+calculate_aac_UpDownUpDown <- function(y,t) {
+  y0<- y[[1]]
+  y1<- y[[2]]
+  y2<- y[[3]]
+  y3<- y[[4]]
+  y4<- y[[5]]
+  
+  A<- 0.5*t*(y1-y0)+0.5*(t*(y1-y0)/(y2-y1))*(y1-y0)+0.5*(t*(y3-y0)/(y3-y2))*(y3-y0)+ 0.5*(t*(y3-y0)/(y3-y4))*(y3-y0)
+  
+  B<- 0.5*(t*(y0-y2)/(y1-y2))*(y0-y2)+0.5*(t*(y0-y2)/(y1-y2))*(y0-y2)+0.5*(t*(y0-y4)/(y3-y4))*(y0-y4)
+    
+  total_aac<- B-A
+  return(total_aac)
+}
+
+
+
+calculate_aac_EqualDownDownDown <- function(y,t) {
+  y0<- y[[1]]
+  y1<- y[[2]]
+  y2<- y[[3]]
+  y3<- y[[4]]
+  y4<- y[[5]]
+  A<- 0
+  B<- 0.5*((y0-y1)+(y0-y2))*t + 0.5*((y0-y2)+(y0-y3) )*t +0.5*((y0-y3)+(y0-y4) )*t 
+    
+  total_aac<- B-A
+  return(total_aac)
+}
+
+
+# calculate_aac_DownDownDownDown <- function(y,t) {
+#   y0<- y[[1]]
+#   y1<- y[[2]]
+#   y2<- y[[3]]
+#   y3<- y[[4]]
+#   y4<- y[[5]]
+# 
+#   B<- 0.5*(y0-y1)*t+0.5*(y0-y1+y0-y2)*t + 0.5*(y0-y2+y0-y3)*t +0.5*(y0-y3+y0-y4 )*t 
+#   total_aac<- B
+#   return(total_aac)
+# }
+
+
+calculate_aac_trapezoidal1 <- function(y, t) {
+    k <- length(y)
+    total_aac <- 0
+    for (i in 2:k) {
+        trap_area <- y[[1]] - y[[i-1]]
+        total_aac<-total_aac+trap_area
+    }
+     int  <-    1/2 * (y[[1]] - y[[k]]) 
+    total_aac<-( int + total_aac)*t
+    return(total_aac)
+}
+
+
+
+
+calculate_aac_trapezoidal <- function(y, t) {
+    k <- length(y)
+    total_aac <- 0
+    # Calculate the area of the first trapezoid
+    total_aac <- 0.5 * (y[[1]] - y[[2]]) * t
+    # Calculate the areas of the remaining trapezoids
+    for (i in 3:k) {
+        trap_area <- 0.5 * ((y[[1]] - y[[i-1]]) + (y[[1]] - y[[i]])) * t
+        total_aac <- total_aac + trap_area
+    }
+    return(total_aac)
+}
+
+
+
+process_result<- function(data){
+result<- data %>% 
+  mutate(AAC = case_when(
+    Category == "DownDownDownDown" ~ calculate_aac_trapezoidal(data %>% select(-Category,-patient_id),6),
+     #Category == "DownDownDownDown" ~ calculate_aac_DownDownDownDown(data %>% select(-Category,-patient_id),6),
+    Category == "UpDownDownDown" ~ calculate_aac_UpDownDownDown(data %>% select(-Category,-patient_id),6),
+    Category == "EqualDownDownDown" ~ calculate_aac_EqualDownDownDown(data %>% select(-Category,-patient_id),6),
+    Category == "UpUpUpDown" ~ calculate_aac_UpUpUpDown(data %>% select(-Category,-patient_id),6),
+    Category == "UpUpUpUp" ~ calculate_aac_UpUpUpUp(data %>% select(-Category,-patient_id),6),
+    Category == "DownUpUpUp" ~ calculate_aac_DownUpUpUp(data %>% select(-Category,-patient_id),6),
+    Category == "UpUpDownDown" ~ calculate_aac_UpUpDownDown(data %>% select(-Category,-patient_id),6),
+    Category == "DownDownUpDown" ~ calculate_aac_DownDownUpDown(data %>% select(-Category,-patient_id),6),
+    Category == "DownUpDownDown" ~ calculate_aac_DownUpDownDown(data %>% select(-Category,-patient_id),6),
+    Category == "UpDownUpDown" ~ calculate_aac_UpDownUpDown(data %>% select(-Category,-patient_id),6)
+ ))  
+    return(result)
+}
+
+
+
+
+
+process_result1<- function(data){
+result<- data %>% 
+  mutate(AAC = calculate_aac_trapezoidal(data %>% select(-Category,-patient_id),6) )
+    return(result)
+}
+
+OS_result<- process_result1(OS)
+OD_result<- process_result1(OD)
+
+OS_result_18<- process_result1(OS_18)
+OD_result_18<- process_result1(OD_18)
+
+OS_result_12<- process_result1(OS_12)
+OD_result_12<- process_result1(OD_12)
+# OS_result %>% filter(!is.na(AAC)) %>% 
+#   summarise(sum(AAC))
+# 
+# OD_result %>% filter(!is.na(AAC)) %>% 
+#   summarise(sum(AAC))
+# 
+# calculate_correlation_with_ci(OS_result$AAC,OD_result$AAC)
+
+```
+
+# Area Above Curve with outcome measurements observed at pre-specified follow-up visits. The AAC can be empirically and non-parametrically estimated as the sum of all the trapezoids determined by the measurements at all visits.
+
+To estimate the AAC, the area can be non-parametrically estimated as the sum of trapezoids (Let y_i be the outcome variable measured at visit j,
+j = 0,1,2...K ; The interval length, denoted as t;
+ 
+\[
+AAC = (\sum_{j=1}^{k-1} \left( (y_0 - y_i) + \frac{1}{2} \times (y_0 - y_k) \right))\times(t)
+\]
+
+# General calculations for the AAC are conducted. Following this, the between-eye correlation analysis for the AAC of EZ-width is performed.
+
+Protocol Addendum to be added as 6.1.2.4 
+
+Although EZ loss is expected to be a degenerative process, it is unknown whether EZ width at a follow-up visit may be greater than that at baseline due to measurement error or due to intervention effect. The AAC is the cumulative loss of EZ width overtime. Its calculation needs to consider if there was gain of EZ width during follow-up (i.e. negative loss). Section 6.1.2.3 derives the AAC calculation if  y1 is increased compared to y0 . Here we provide an algorithm that derives the general AAC calculation without assuming whether a follow-up EZ-width measurement is greater than y0.  `general_AAC_calculation` is a function will escalate for AAC 
+ 
+
+## Month 24 EZ width AAC & Correlation
+
+```{r, message=FALSE, results="asis",echo=FALSE,warning=FALSE}
+#############################################################
+
+general_AAC_calculation <- function(data, t) {
+  aac_values <- numeric(nrow(data)) # Initialize a vector to store AAC values for each row
+  
+  for (row_index in 1:nrow(data)) {
+    y <- unlist(data[row_index, ]) # Extract a list of row values
+    k <- length(y) # k is the total visits
+    aac <- 0 # Initialize aac to zero
+    y0 <- y[[1]] # First value in the y
+    y1 <- y[[2]] # Second value in the y
+    
+    # If only one visit, we use this equation;
+    if (k == 2) {
+      aac <- 0.5 * abs(y0 - y1) * t * sign(y0 - y1) # Only one visit;
+    } # End of 'if (k == 2)' block
+    else if (k > 2) { # More than one follow up visit, check if it is Case 1 or Case 2 then calculate aac for different case condition;
+      for (i in 2:k) {
+        # if (y0 == y1 ) {
+        if (any(y0 == y[1:k])){
+          # If y0 and y1 are equal
+          # calculate area_trap using the provided equation
+          area_trap <- 1/2 * ((y0 - y[(i - 1)]) + (y0 - y[i])) * t
+          aac <- aac + area_trap
+          # print(paste("AAC at step", i-1, ":", aac))
+        } else {
+          if (any((y0 - y[(i - 1)]) * (y0 - y[i]) > 0)) {
+            # Case 1: a trapezoid
+            area_trap <- 1/2 * (abs(y0 - y[(i - 1)]) + abs(y0 - y[i])) * t * sign(y0 - y[i])
+            aac <- aac + area_trap # Add the area for loss to aac
+            # print(paste("AAC at step", i-1, ":", aac))
+          } else {
+            # Case 2: not a trapezoid, one area gain
+            area_gain <- t/2 * ((abs(y0 - y[(i - 1)])^2 * sign(y0 - y[(i - 1)]))) / ((abs(y0 - y[(i - 1)]) + abs(y0 - y[i]))) +
+              t/2 * ((abs(y0 - y[i])^2 * sign(y0 - y[i]))) / ((abs(y0 - y[(i - 1)]) + abs(y0 - y[i])))
+            aac <- aac + area_gain # Add the area for gain to aac
+            # print(paste("AAC at step", i-1, ":", aac))
+          }
+        }
+      } # End of 'else if (k > 2)' block
+    }
+    aac_values[row_index] <- aac # Store AAC value for the current row
+  }
+  return(aac_values)
+}
+
+process_result_for_general_AAC<- function(data){
+result<- data %>% 
+  mutate(AAC_general = general_AAC_calculation(data %>% select(-Category,-patient_id),6)
+ )  
+    return(result)
+}
+
+OS_result1<- process_result_for_general_AAC(OS)  %>% mutate(Eye="OS")
+OD_result1<- process_result_for_general_AAC(OD) %>% mutate(Eye="OD")
+
+
+OS_result18<- process_result_for_general_AAC(OS_18)  %>% mutate(Eye="OS")
+OD_result18<- process_result_for_general_AAC(OD_18) %>% mutate(Eye="OD")
+
+
+OS_result12<- process_result_for_general_AAC(OS_12)  %>% mutate(Eye="OS")
+OD_result12<- process_result_for_general_AAC(OD_12) %>% mutate(Eye="OD")
+
+# OS_result1 %>% filter(!is.na(AAC_general)) %>%
+#   summarise(sum(AAC_general)) 
+# 
+# OD_result1 %>% filter(!is.na(AAC_general)) %>%
+#   summarise(sum(AAC_general)) 
+
+print("Month24 data: Between-eye correlation of the AAC of EZ-width:")
+calculate_correlation_with_ci(OS_result1$AAC_general,OD_result1$AAC_general) %>% kable()
+
+
+print("Month24 and Month 18 data are same for : Baseline EZ-width Correlation")
+calculate_correlation_with_ci(M24 %>% filter(Eye=="OD" & Time =="0") %>% pull(EZ_width),M24 %>% filter(Eye=="OS" & Time =="0") %>% pull(EZ_width))%>% kable()
+
+
+calculate_correlation_with_ci(M18 %>% filter(Eye=="OD" & Time =="0") %>% pull(EZ_width),M18 %>% filter(Eye=="OS" & Time =="0") %>% pull(EZ_width))%>% kable()
+
+
+print("Month12 data: Baseline EZ-width Correlation")
+calculate_correlation_with_ci(M12 %>% filter(Eye=="OD" & Time =="0") %>% pull(EZ_width),M12 %>% filter(Eye=="OS" & Time =="0") %>% pull(EZ_width))%>% kable()
+ 
+
+# 
+# print("Month24 data: EZ_Width Baseline Correlation")
+# calculate_correlation_with_ci(OS_result1$AAC_general,OD_result1$AAC_general) %>% kable()
+
+#both eye's results 
+EZ_S1<- bind_rows(OS_result1,OD_result1) 
+
+
+EZ_S<- EZ_S1 %>% 
+     select(- patient_id) %>% 
+  tbl_summary(
+    statistic = list(
+      all_continuous() ~ paste(
+        "{mean} ({sd});",
+        "{min}~{max};",
+        "{median} [{p25} - {p75}]"
+      ))
+  ) %>% 
+  modify_header(label ~ "**Eligible Sample Eyes**") %>%
+  modify_caption("**Summary statistics of EZ among eligible patients**") %>%
+  bold_labels() 
+
+print("Summary statistics for EZ width : Baseline until Month24")
+as_gt(EZ_S)
+ 
+
+```
+
+## Month 18 EZ width AAC
+
+```{r, message=FALSE, results="asis",echo=FALSE,warning=FALSE}
+
+print("Month 18 data: Between-eye correlation of the AAC of EZ-width:")
+calculate_correlation_with_ci(OS_result18$AAC_general,OD_result18$AAC_general) %>% kable()
+
+#both eye's results 
+EZ_18<- bind_rows(OS_result18,OD_result18) 
+
+
+EZ_18<- EZ_18 %>% 
+     select(- patient_id) %>% 
+  tbl_summary(
+    statistic = list(
+      all_continuous() ~ paste(
+        "{mean} ({sd});",
+        "{min}~{max};",
+        "{median} [{p25} - {p75}]"
+      ))
+  ) %>% 
+  modify_header(label ~ "**Eligible Sample Eyes**") %>%
+  modify_caption("**M18:Summary statistics of EZ among eligible patients**") %>%
+  bold_labels() 
+
+print("Summary statistics for EZ width : Baseline until Month18")
+as_gt(EZ_18)
+ 
+```
+
+
+## Month 12 EZ width AAC
+
+```{r, message=FALSE, results="asis",echo=FALSE,warning=FALSE}
+
+print("Month 12 data: Between-eye correlation of the AAC of EZ-width:")
+calculate_correlation_with_ci(OS_result12$AAC_general,OD_result12$AAC_general) %>% kable()
+
+#both eye's results 
+EZ_12<- bind_rows(OS_result12,OD_result12) 
+
+
+EZ_12<- EZ_12 %>% 
+     select(- patient_id) %>% 
+  tbl_summary(
+    statistic = list(
+      all_continuous() ~ paste(
+        "{mean} ({sd});",
+        "{min}~{max};",
+        "{median} [{p25} - {p75}]"
+      ))
+  ) %>% 
+  modify_header(label ~ "**Eligible Sample Eyes**") %>%
+  modify_caption("**M12:Summary statistics of EZ among eligible patients**") %>%
+  bold_labels() 
+
+print("Summary statistics for EZ width : Baseline until Month12")
+as_gt(EZ_18)
+ 
+```
+
+# Calculate Correlation and Summary Statistics Using Month 24 data; (Mean and standard deviation) for Secondary Outcome(change_MAIA,change_VA) 
+
+```{r, message=FALSE, results="asis",echo=FALSE,warning=FALSE}
+generate_summary <- function(data, maia_var) {
+  library(glue)
+  A <- data %>%
+    filter(Time %in% c("0")) %>%
+    group_by(Time, Eye) %>%
+    mutate(
+      time0_missing = case_when(
+        Time == "0" & is.na({{ maia_var }}) ~ "Missing",
+        Time == "0" & !is.na({{ maia_var }}) ~ "Non-Missing",
+        TRUE ~ NA_character_
+      )) %>%
+    select(patient_id, Time, {{ maia_var }}, Eye, time0_missing)
+  
+  B <- data %>%
+    filter(Time %in% c("24")) %>%
+    group_by(Time, Eye) %>%
+    mutate(
+      time24_missing = case_when(
+        Time == "24" & is.na({{ maia_var }}) ~ "Missing",
+        Time == "24" & !is.na({{ maia_var }}) ~ "Non-Missing",
+        TRUE ~ NA_character_
+      )) %>%
+    select(patient_id, Time, {{ maia_var }}, Eye, time24_missing)
+  
+  C <- full_join(A, B, by = c("patient_id", "Eye")) %>%
+    mutate(
+      time_both_missing = case_when(
+      time0_missing == "Non-Missing" & time24_missing == "Non-Missing" ~ "Non-Missing",
+      time0_missing == "Missing" & time24_missing == "Missing" ~ "Missing",
+      time0_missing == "Non-Missing" & time24_missing == "Missing" ~"Baseline Not Missing, Follow up Missing",
+        TRUE ~ "Baseline Missing, Follow up not Missing"
+      )
+    )
+ 
+  return(C)
+}
+
+MAIA<-generate_summary(data = M24, maia_var = MAIA) %>% mutate(change_MAIA = MAIA.y -MAIA.x)%>% arrange(patient_id) %>% select(-time_both_missing,-time0_missing,-time24_missing)
+ 
+print("change_MAIA Correlation")
+calculate_correlation_with_ci(MAIA %>% filter(Eye=="OD") %>% pull(change_MAIA),MAIA %>% filter(Eye=="OS") %>% pull(change_MAIA))%>% kable()
+ 
+
+print("MAIA Baseline Correlation")
+calculate_correlation_with_ci(MAIA %>% filter(Eye=="OD") %>% pull(MAIA.x),MAIA %>% filter(Eye=="OS") %>% pull(MAIA.x))%>% kable()
+
+print("MAIA Month 24 Correlation")
+calculate_correlation_with_ci(MAIA %>% filter(Eye=="OD") %>% pull(MAIA.y),MAIA %>% filter(Eye=="OS") %>% pull(MAIA.y))%>% kable()
+
+
+
+print(" ")
+######################################################
+ 
+
+########################################################
+print(" ")
+
+VA<-generate_summary(data = M24, maia_var = VA) %>% mutate(change_VA = VA.y -VA.x) %>% arrange(patient_id) %>% select(-time_both_missing,-time0_missing,-time24_missing)
+
+print("change_VA Correlation")
+calculate_correlation_with_ci(VA %>% filter(Eye=="OD") %>% pull(change_VA),VA %>% filter(Eye=="OS") %>% pull(change_VA))%>% kable()
+
+print("VA Baseline Correlation")
+calculate_correlation_with_ci(VA %>% filter(Eye=="OD") %>% pull(VA.x),VA %>% filter(Eye=="OS") %>% pull(VA.x))%>% kable()
+
+print("VA Month 24 Correlation")
+calculate_correlation_with_ci(VA %>% filter(Eye=="OD") %>% pull(VA.y),VA %>% filter(Eye=="OS") %>% pull(VA.y))%>% kable()
+
+# summary statistics we exclude ineligible eyes;
+MAIA_S<- MAIA %>% 
+  dplyr::select(MAIA_Month24=MAIA.y,MAIA_Baseline=MAIA.x,change_MAIA) %>% 
+  tbl_summary(
+    statistic = list(
+      all_continuous() ~ paste(
+        "{mean} ({sd});",
+        "{min}~{max};",
+        "{median} [{p25} - {p75}]"
+      ))
+  ) %>% 
+  modify_header(label ~ "**Variable**") %>%
+  modify_caption("**Summary statistics of MAIA among eligible patients**") %>%
+  bold_labels() 
+# summary statistics we exclude ineligible eyes;
+
+
+VA_S<-VA %>% 
+  dplyr::select(VA_Month24=VA.y,VA_Baseline=VA.x,change_VA) %>% 
+  tbl_summary(
+    statistic = list(
+      all_continuous() ~ paste(
+        "{mean} ({sd});",
+        "{min}~{max};",
+        "{median} [{p25} - {p75}]"
+      ))
+  ) %>% 
+  modify_header(label ~ "**Variable**") %>%
+  modify_caption("**Summary statistics of VA among eligible patients**") %>%
+  bold_labels() 
+
+print("Summary statistics for MAIA")
+as_gt(MAIA_S)
+print("Summary statistics for VA")
+as_gt(VA_S)
+
+
+```
+
+# Calculate Correlation and Summary Statistics Using Month 18 data; (Mean and standard deviation) for Secondary Outcome(change_MAIA,change_VA) 
+
+```{r, message=FALSE, results="asis",echo=FALSE,warning=FALSE}
+generate_summary18 <- function(data, maia_var) {
+  library(glue)
+  A <- data %>%
+    filter(Time %in% c("0")) %>%
+    group_by(Time, Eye) %>%
+    mutate(
+      time0_missing = case_when(
+        Time == "0" & is.na({{ maia_var }}) ~ "Missing",
+        Time == "0" & !is.na({{ maia_var }}) ~ "Non-Missing",
+        TRUE ~ NA_character_
+      )) %>%
+    select(patient_id, Time, {{ maia_var }}, Eye, time0_missing)
+  
+  B <- data %>%
+    filter(Time %in% c("18")) %>%
+    group_by(Time, Eye) %>%
+    mutate(
+      time18_missing = case_when(
+        Time == "18" & is.na({{ maia_var }}) ~ "Missing",
+        Time == "18" & !is.na({{ maia_var }}) ~ "Non-Missing",
+        TRUE ~ NA_character_
+      )) %>%
+    select(patient_id, Time, {{ maia_var }}, Eye, time18_missing)
+  
+  C <- full_join(A, B, by = c("patient_id", "Eye")) %>%
+    mutate(
+      time_both_missing = case_when(
+      time0_missing == "Non-Missing" & time18_missing == "Non-Missing" ~ "Non-Missing",
+      time0_missing == "Missing" & time18_missing == "Missing" ~ "Missing",
+      time0_missing == "Non-Missing" & time18_missing == "Missing" ~"Baseline Not Missing, Follow up Missing",
+        TRUE ~ "Baseline Missing, Follow up not Missing"
+      )
+    )
+ 
+  return(C)
+}
+
+
+MAIA_18<-generate_summary18(data = M18, maia_var = MAIA) %>% mutate(change_MAIA = MAIA.y -MAIA.x)%>% arrange(patient_id) %>% select(-time_both_missing,-time0_missing,-time18_missing)
+
+print("change_MAIA Correlation")
+calculate_correlation_with_ci(MAIA_18 %>% filter(Eye=="OD") %>% pull(change_MAIA),MAIA_18 %>% filter(Eye=="OS") %>% pull(change_MAIA))%>% kable()
+
+print("MAIA Baseline Correlation")
+calculate_correlation_with_ci(MAIA_18 %>% filter(Eye=="OD") %>% pull(MAIA.x),MAIA_18 %>% filter(Eye=="OS") %>% pull(MAIA.x))%>% kable()
+
+print("MAIA Month 18 Correlation")
+calculate_correlation_with_ci(MAIA_18 %>% filter(Eye=="OD") %>% pull(MAIA.y),MAIA_18 %>% filter(Eye=="OS") %>% pull(MAIA.y))%>% kable()
+
+
+
+print(" ")
+
+
+
+VA_18<-generate_summary18(data = M18, maia_var = VA) %>% mutate(change_VA = VA.y -VA.x) %>% arrange(patient_id) %>% select(-time_both_missing,-time0_missing,-time18_missing)
+
+print("change_VA Correlation")
+calculate_correlation_with_ci(VA_18 %>% filter(Eye=="OD") %>% pull(change_VA),VA_18 %>% filter(Eye=="OS") %>% pull(change_VA))%>% kable()
+
+print("VA Baseline Correlation")
+calculate_correlation_with_ci(VA_18 %>% filter(Eye=="OD") %>% pull(VA.x),VA_18 %>% filter(Eye=="OS") %>% pull(VA.x))%>% kable()
+
+print("VA Month 18 Correlation")
+calculate_correlation_with_ci(VA_18 %>% filter(Eye=="OD") %>% pull(VA.y),VA_18 %>% filter(Eye=="OS") %>% pull(VA.y))%>% kable()
+
+# summary statistics we exclude ineligible eyes;
+MAIA_18<- MAIA_18 %>% 
+  dplyr::select(MAIA_Month18=MAIA.y,MAIA_Baseline=MAIA.x,change_MAIA) %>% 
+  tbl_summary(
+    statistic = list(
+      all_continuous() ~ paste(
+        "{mean} ({sd});",
+        "{min}~{max};",
+        "{median} [{p25} - {p75}]"
+      ))
+  ) %>% 
+  modify_header(label ~ "**Variable**") %>%
+  modify_caption("**Summary statistics of MAIA among eligible patients**") %>%
+  bold_labels() 
+# summary statistics we exclude ineligible eyes;
+
+
+VA_18<-VA_18 %>% 
+  dplyr::select(VA_Month18=VA.y,VA_Baseline=VA.x,change_VA) %>% 
+  tbl_summary(
+    statistic = list(
+      all_continuous() ~ paste(
+        "{mean} ({sd});",
+        "{min}~{max};",
+        "{median} [{p25} - {p75}]"
+      ))
+  ) %>% 
+  modify_header(label ~ "**Variable**") %>%
+  modify_caption("**Summary statistics of VA among eligible patients**") %>%
+  bold_labels() 
+
+print("Summary statistics for MAIA")
+as_gt(MAIA_18)
+print("Summary statistics for VA")
+as_gt(VA_18)
+
+
+```
+# Calculate Correlation and Summary Statistics Using Month 12 data; (Mean and standard deviation) for Secondary Outcome(change_MAIA,change_VA) 
+
+```{r, message=FALSE, results="asis",echo=FALSE,warning=FALSE}
+generate_summary12 <- function(data, maia_var) {
+  library(glue)
+  A <- data %>%
+    filter(Time %in% c("0")) %>%
+    group_by(Time, Eye) %>%
+    mutate(
+      time0_missing = case_when(
+        Time == "0" & is.na({{ maia_var }}) ~ "Missing",
+        Time == "0" & !is.na({{ maia_var }}) ~ "Non-Missing",
+        TRUE ~ NA_character_
+      )) %>%
+    select(patient_id, Time, {{ maia_var }}, Eye, time0_missing)
+  
+  B <- data %>%
+    filter(Time %in% c("12")) %>%
+    group_by(Time, Eye) %>%
+    mutate(
+      time12_missing = case_when(
+        Time == "12" & is.na({{ maia_var }}) ~ "Missing",
+        Time == "12" & !is.na({{ maia_var }}) ~ "Non-Missing",
+        TRUE ~ NA_character_
+      )) %>%
+    select(patient_id, Time, {{ maia_var }}, Eye, time12_missing)
+  
+  C <- full_join(A, B, by = c("patient_id", "Eye")) %>%
+    mutate(
+      time_both_missing = case_when(
+      time0_missing == "Non-Missing" & time12_missing == "Non-Missing" ~ "Non-Missing",
+      time0_missing == "Missing" & time12_missing == "Missing" ~ "Missing",
+      time0_missing == "Non-Missing" & time12_missing == "Missing" ~"Baseline Not Missing, Follow up Missing",
+        TRUE ~ "Baseline Missing, Follow up not Missing"
+      )
+    )
+ 
+  return(C)
+}
+
+MAIA12<-generate_summary12(data = M12, maia_var = MAIA) %>% mutate(change_MAIA = MAIA.y -MAIA.x)%>% arrange(patient_id) %>% select(-time_both_missing,-time0_missing,-time12_missing)
+
+print("change_MAIA Correlation")
+calculate_correlation_with_ci(MAIA12 %>% filter(Eye=="OD") %>% pull(change_MAIA),MAIA12 %>% filter(Eye=="OS") %>% pull(change_MAIA))%>% kable()
+
+print("MAIA Baseline Correlation")
+calculate_correlation_with_ci(MAIA12 %>% filter(Eye=="OD") %>% pull(MAIA.x),MAIA12 %>% filter(Eye=="OS") %>% pull(MAIA.x))%>% kable()
+
+print("MAIA Month 12 Correlation")
+calculate_correlation_with_ci(MAIA %>% filter(Eye=="OD") %>% pull(MAIA.y),MAIA %>% filter(Eye=="OS") %>% pull(MAIA.y))%>% kable()
+
+
+
+print(" ")
+
+
+
+VA12<-generate_summary12(data = M12, maia_var = VA) %>% mutate(change_VA = VA.y -VA.x) %>% arrange(patient_id) %>% select(-time_both_missing,-time0_missing,-time12_missing)
+
+print("change_VA Correlation")
+calculate_correlation_with_ci(VA12 %>% filter(Eye=="OD") %>% pull(change_VA),VA12%>% filter(Eye=="OS") %>% pull(change_VA))%>% kable()
+
+print("VA Baseline Correlation")
+calculate_correlation_with_ci(VA12 %>% filter(Eye=="OD") %>% pull(VA.x),VA12 %>% filter(Eye=="OS") %>% pull(VA.x))%>% kable()
+
+print("VA Month 12 Correlation")
+calculate_correlation_with_ci(VA %>% filter(Eye=="OD") %>% pull(VA.y),VA %>% filter(Eye=="OS") %>% pull(VA.y))%>% kable()
+
+```
+
+
+
+
+# Linear mixed-effects model summary for primary outcome EZ_width 
+```{r, message=FALSE, results="asis",echo=FALSE,warning=FALSE}
+print("Summary of mixed-effects model for EZ_width")
+summary(model1)
+
+```
+
+# GEE Model for secondary outcomes(change_MAIA,change_VA)
+
+```{r, message=FALSE, results="asis",echo=FALSE,warning=FALSE}
+VA$patient_id <- as.factor(VA$patient_id)
+MAIA$patient_id <- as.factor(MAIA$patient_id)
+
+# - Notes: 
+# - The data frame have two rows per patient, one for the left eye and one for the right eye.
+# - The outcome variable change represents the change from baseline to M24 for each eye (M24 - Baseline).
+# - (Note: summarize the data as the change from baseline to M24, you cannot include TIME as a covariate because we have effectively collapsed the longitudinal data into a single time point.)
+# - The id column represents the patient ID, which is used to account for the correlation between the two eyes.
+# - corstr = "exchangeable" specifies the correlation structure within subjects
+
+
+# Load required libraries
+library(geepack)
+library(lmtest)
+print("Summary of GEE model for MAIA change")
+cat("\n\n")
+# Define the GEE model with compound symmetry correlation structure
+maia_gee_model <- geeglm(change_MAIA ~ 1 , data = MAIA, id = patient_id, corstr = "exchangeable", family = gaussian)
+
+maia_gee_model
+cat("\n\n")
+# Summary of the MAIA GEE model
+summary(maia_gee_model)
+
+#######################################################################################
+#VA change
+###################################################################################
+
+
+cat("\n\n")
+print("Summary of GEE model for VA change")
+cat("\n\n")
+# Fit GEE model for VA change with exchangeable correlation structure
+va_gee_model <- geeglm(change_VA ~ 1, data = VA, id = patient_id, corstr = "exchangeable", family = gaussian)
+va_gee_model
+cat("\n\n")
+# Summary of the VA GEE model
+summary(va_gee_model) 
+
+```
+
+
+ 
+
